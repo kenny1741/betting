@@ -108,7 +108,7 @@ export default function AdminPage() {
       const url    = `/api/sync?secret=${encodeURIComponent(secret)}&type=${type}&league=${i}`;
       const result = await safeFetch(url);
 
-      if (result.success && result.skipped) {
+      if (result.success && (result as any).skipped) {
         setStep(i, { status: "skipped" });
       } else if (result.success) {
         setStep(i, { status: "done", synced: result.synced });
