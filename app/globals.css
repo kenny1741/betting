@@ -1,0 +1,59 @@
+@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg:      #080d14;
+  --surface: #0d1520;
+  --card:    #111827;
+  --border:  rgba(255,255,255,0.07);
+  --green:   #22c55e;
+  --amber:   #f59e0b;
+  --red:     #ef4444;
+  --blue:    #3b82f6;
+  --muted:   rgba(255,255,255,0.45);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  background: var(--bg);
+  color: #e2e8f0;
+  font-family: 'Inter', sans-serif;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+body::before {
+  content: '';
+  position: fixed;
+  top: -200px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 900px;
+  height: 600px;
+  background: radial-gradient(ellipse, rgba(34,197,94,0.05) 0%, transparent 70%);
+  pointer-events: none;
+  z-index: 0;
+}
+main { position: relative; z-index: 1; }
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 4px; }
+
+@keyframes livePulse { 0%,100%{opacity:1}50%{opacity:.25} }
+.live-dot { animation: livePulse 1.4s ease-in-out infinite; }
+
+@keyframes slideUp { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+.slide-up { animation: slideUp .22s ease-out; }
+
+@keyframes shimmer {
+  0%{background-position:-200% 0}
+  100%{background-position:200% 0}
+}
+.skeleton {
+  background: linear-gradient(90deg,#1a2236 25%,#1e2a40 50%,#1a2236 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.6s infinite;
+}
