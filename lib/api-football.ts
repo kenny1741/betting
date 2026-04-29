@@ -270,6 +270,29 @@ export function normaliseFDOMatch(m: any, leagueId: number) {
   };
 }
 
+
+export const fetchFixturesByDate = async (date: string) => {
+  try {
+    const results = [];
+
+    for (const league of LEAGUES) {
+      const matches = await fetchFixtures(
+        league.id,
+        league.season,
+        date
+      );
+      results.push(...matches);
+    }
+
+    return results;
+  } catch (error) {
+    console.error("Error fetching fixtures by date:", error);
+    return [];
+  }
+};
+
+
+
 function mapFDOStatus(status: string): string {
   // Maps to our internal short codes that sync.ts then passes through mapStatus()
   // mapStatus() converts: NS→SCHEDULED, 1H→1H, HT→HT, FT→FT etc.

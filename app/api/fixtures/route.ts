@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { format, addDays } from "date-fns";
 import { GLOBAL_LEAGUES } from "@/lib/leagues";
-import { fetchFixturesByDate, fetchFixturesByRange } from "@/lib/api-football";
+import { fetchFixturesByDate, fetchFixturesRange } from "@/lib/api-football";
+//import { fetchFixturesByDate, fetchFixturesByRange } from "@/lib/api-football";
 import type { Match } from "@/types";
 
 export const dynamic = "force-dynamic";
