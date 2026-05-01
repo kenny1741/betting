@@ -61,7 +61,7 @@ export function BetOfDay() {
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: "0.8rem", color: "var(--muted)", marginBottom: "0.2rem", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                  {m.league.name}
+                  {m.league?.name || "Unknown League"}
                 </div>
                 <div style={{ fontSize: "0.85rem", fontWeight: 600, color: "white", marginBottom: "0.3rem", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                   {m.homeTeam.name} vs {m.awayTeam.name}
