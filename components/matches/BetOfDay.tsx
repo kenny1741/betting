@@ -61,14 +61,14 @@ export function BetOfDay() {
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: "0.8rem", color: "var(--muted)", marginBottom: "0.2rem", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                  {m.league?.name || "Unknown League"}
+                  {m.leagueName}
                 </div>
                 <div style={{ fontSize: "0.85rem", fontWeight: 600, color: "white", marginBottom: "0.3rem", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                   {m.homeTeam.name} vs {m.awayTeam.name}
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                  <span style={{ fontSize: "0.75rem", fontWeight: 700, color: OUTCOME_COLOR[m.prediction.outcome], background: `${OUTCOME_COLOR[m.prediction.outcome]}15`, border: `1px solid ${OUTCOME_COLOR[m.prediction.outcome]}30`, borderRadius: 4, padding: "2px 7px" }}>
-                    {OUTCOME_LABEL[m.prediction.outcome]}
+                  <span style={{ fontSize: "0.75rem", fontWeight: 700, color: OUTCOME_COLOR[m.prediction.pick], background: `${OUTCOME_COLOR[m.prediction.pick]}15`, border: `1px solid ${OUTCOME_COLOR[m.prediction.pick]}30`, borderRadius: 4, padding: "2px 7px" }}>
+                    {OUTCOME_LABEL[m.prediction.pick]}
                   </span>
                   <span style={{ fontSize: "0.7rem", color: "var(--muted)" }}>
                     {new Date(m.kickoff).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })} UTC

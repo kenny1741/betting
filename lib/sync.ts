@@ -1,7 +1,348 @@
 // Sync Engine — supports football-data.org (FDO) + API-Football via RapidAPI
 // ONE league at a time to stay within serverless timeout
 
+// Sync Engine — football-data.org (FDO) only
+// ONE league at a time to stay within serverless timeout
+
 import { getServiceClient } from "./supabase";
+import {
+  LEAGUES,
+  getCurrentSeason,
+  fetchFixtures,
+  fetchFixturesRange,
+  fetchLiveFixtures,
+  fetchStandings,
+  mapStatus,
+  normaliseFDOMatch,
+  normaliseFDOStanding,
+} from "./api-football";
+import { buildPrediction, blendWithOdds } from "./prediction";
+import { fetchMatchOdds } from "./odds";
+import { format, addDays } from "date-fns";
+import type { Team } from "@/types";
+
+const delay = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+// ── Combined league list (FDO only) ──────────────────────────────────────────
+export const ALL_LEAGUES = LEAGUES.map(l => ({
+  ...l,
+  source: "fdo" as const,
+  apiId:  l.id,
+}));
+
+// ── Sync standings for ONE league ─────────────────────────────────────────────
+async function syncStandingsForLeague(
+  league: typeof ALL_LEAGUES[0],
+  season: number
+): Promise<Map<number, Team>> {
+  const db  = getServiceClient();
+  const map = new Map<number, Team>();
+
+  let rawRows: any[] = [];
+  try {
+    const raw = await fetchStandings(league.id, season);
+    rawRows = (raw ?? []).map(normaliseFDOStanding);
+  } catch (e: any) {
+    console.error(`Standings fetch error for ${league.name}:`, e?.message);
+    return map;
+  }
+
+  if (!rawRows.length) return map;
+
+  const upserts = rawRows.map((row: any) => {
+    const team: Team = {
+      id:           row.team?.id ?? 0,
+      name:         row.team?.name ?? "",
+      logo:         row.team?.logo ?? "",
+      form:         (row.form ?? "").replace(/[,\s]/g, ""),
+      position:     row.rank ?? undefined,
+      played:       row.all?.played ?? 0,
+      wins:         row.all?.win ?? 0,
+      draws:        row.all?.draw ?? 0,
+      losses:       row.all?.lose ?? 0,
+      goalsFor:     row.all?.goals?.for ?? 0,
+      goalsAgainst: row.all?.goals?.against ?? 0,
+      points:       row.points ?? 0,
+    };
+    map.set(Number(team.id), team);
+    return {
+      team_id:       Number(team.id),
+      league_id:     league.id,
+      season,
+      form:          team.form ?? null,
+      position:      team.position ?? null,
+      played:        team.played ?? 0,
+      wins:          team.wins ?? 0,
+      draws:         team.draws ?? 0,
+      losses:        team.losses ?? 0,
+      goals_for:     team.goalsFor ?? 0,
+      goals_against: team.goalsAgainst ?? 0,
+      points:        team.points ?? 0,
+      updated_at:    new Date().toISOString(),
+    };
+  });
+
+  const { error } = await db
+    .from("team_stats")
+    .upsert(upserts, { onConflict: "team_id,league_id,season" });
+  if (error) console.error("Standings upsert error:", error.message);
+  return map;
+}
+
+// ── Load team stats from Supabase ─────────────────────────────────────────────
+async function loadTeamStats(leagueId: number, season: number): Promise<Map<number, Team>> {
+  const db = getServiceClient();
+  const { data } = await db
+    .from("team_stats")
+    .select("*")
+    .eq("league_id", leagueId)
+    .eq("season", season);
+
+  const map = new Map<number, Team>();
+  for (const row of data ?? []) {
+    map.set(row.team_id, {
+      id:           row.team_id,
+      name:         "",
+      logo:         "",
+      form:         row.form ?? "",
+      position:     row.position ?? undefined,
+      played:       row.played ?? 0,
+      wins:         row.wins ?? 0,
+      draws:        row.draws ?? 0,
+      losses:       row.losses ?? 0,
+      goalsFor:     row.goals_for ?? 0,
+      goalsAgainst: row.goals_against ?? 0,
+      points:       row.points ?? 0,
+    });
+  }
+  return map;
+}
+
+// ── Upsert a single normalised fixture ────────────────────────────────────────
+async function upsertFixture(
+  db: ReturnType<typeof getServiceClient>,
+  raw: any,
+  teamMap: Map<number, Team>,
+  leagueInfo: {
+    id: number;
+    name: string;
+    logo?: string;
+    country: string;
+    season: number;
+  }
+): Promise<boolean> {
+  try {
+    const homeId  = raw?.teams?.home?.id;
+    const awayId  = raw?.teams?.away?.id;
+    const matchId = raw?.fixture?.id;
+    if (!homeId || !awayId || !matchId) return false;
+
+    const homeBase: Team = { id: homeId, name: raw.teams.home.name, logo: raw.teams.home.logo ?? "" };
+    const awayBase: Team = { id: awayId, name: raw.teams.away.name, logo: raw.teams.away.logo ?? "" };
+    const homeTeam: Team = { ...homeBase, ...(teamMap.get(Number(homeId)) ?? {}) };
+    const awayTeam: Team = { ...awayBase, ...(teamMap.get(Number(awayId)) ?? {}) };
+
+    const statusShort = raw.fixture?.status?.short ?? "NS";
+    const status      = mapStatus(statusShort);
+
+    const { error: mErr } = await db.from("matches").upsert({
+      id:             matchId,
+      league_id:      leagueInfo.id,
+      league_name:    leagueInfo.name,
+      league_logo:    leagueInfo.logo ?? null,
+      league_country: leagueInfo.country,
+      season:         leagueInfo.season,
+      home_team_id:   homeId,
+      home_team_name: homeTeam.name,
+      home_team_logo: homeTeam.logo,
+      away_team_id:   awayId,
+      away_team_name: awayTeam.name,
+      away_team_logo: awayTeam.logo,
+      kickoff:        raw.fixture?.date ?? new Date().toISOString(),
+      status,
+      minute:         raw.fixture?.status?.elapsed ?? null,
+      home_score:     raw.goals?.home ?? null,
+      away_score:     raw.goals?.away ?? null,
+      venue:          raw.fixture?.venue?.name ?? null,
+      synced_at:      new Date().toISOString(),
+      updated_at:     new Date().toISOString(),
+    }, { onConflict: "id" });
+
+    if (mErr) { console.error("Match upsert error:", mErr.message); return false; }
+
+    // Build prediction + optional odds blend
+    let pred = buildPrediction(homeTeam, awayTeam);
+    if (process.env.ODDS_API_KEY && status === "SCHEDULED") {
+      try {
+        const odds = await fetchMatchOdds(
+          homeTeam.name,
+          awayTeam.name,
+          raw.fixture?.date ?? "",
+          leagueInfo.name,
+        );
+        if (odds) pred = blendWithOdds(pred, odds.home, odds.draw, odds.away);
+      } catch (e) {
+        console.warn("Odds fetch skipped:", e);
+      }
+    }
+
+    const { error: pErr } = await db.from("predictions").upsert({
+      match_id:       matchId,
+      home_win_pct:   pred.homeWinPct,
+      draw_pct:       pred.drawPct,
+      away_win_pct:   pred.awayWinPct,
+      btts_yes_pct:   pred.bttsYesPct,
+      over25_pct:     pred.over25Pct,
+      over15_pct:     pred.over15Pct,
+      pick:           pred.pick,
+      confidence:     pred.confidence,
+      reasoning:      pred.reasoning,
+      is_top_pick:    pred.isTopPick,
+      odds_home:      pred.oddsHome ?? null,
+      odds_draw:      pred.oddsDraw ?? null,
+      odds_away:      pred.oddsAway ?? null,
+      odds_home_pct:  pred.oddsHomePct ?? null,
+      odds_draw_pct:  pred.oddsDrawPct ?? null,
+      odds_away_pct:  pred.oddsAwayPct ?? null,
+      odds_synced_at: pred.oddsHome ? new Date().toISOString() : null,
+      updated_at:     new Date().toISOString(),
+    }, { onConflict: "match_id" });
+
+    if (pErr) console.error("Prediction upsert error:", pErr.message);
+
+    // Goal events
+    if (raw._goals?.length > 0) {
+      await db.from("goal_events").delete().eq("match_id", matchId);
+      const goals = raw._goals.map((e: any) => ({
+        match_id: matchId,
+        minute:   e.time?.elapsed ?? 0,
+        scorer:   e.player?.name ?? "Unknown",
+        assist:   e.assist?.name ?? null,
+        team:     e.team?.id === homeId ? "home" : "away",
+        type:     e.detail === "Own Goal" ? "own" : e.detail === "Penalty" ? "penalty" : "normal",
+      }));
+      await db.from("goal_events").insert(goals);
+    }
+
+    return true;
+  } catch (e: any) {
+    console.error("upsertFixture error:", e?.message);
+    return false;
+  }
+}
+
+// ── Main sync export ──────────────────────────────────────────────────────────
+export async function runSync(
+  type: "standings" | "today" | "tomorrow" | "upcoming" | "live" | "full",
+  leagueIndex = 0
+): Promise<{ success: boolean; synced?: number; error?: string; league?: string }> {
+  const db     = getServiceClient();
+  const season = getCurrentSeason();
+  const now    = new Date();
+  const league = ALL_LEAGUES[leagueIndex];
+
+  if (!league && type !== "live") {
+    return { success: false, error: `Invalid league index: ${leagueIndex}` };
+  }
+
+  const today    = format(now, "yyyy-MM-dd");
+  const tomorrow = format(addDays(now, 1), "yyyy-MM-dd");
+  const from     = format(addDays(now, 2), "yyyy-MM-dd");
+  const to       = format(addDays(now, 7), "yyyy-MM-dd");
+
+  console.log(`🔄 Sync [${type}] league: ${league?.name ?? "all-live"} season: ${season}`);
+  let synced = 0;
+
+  try {
+
+    // ── LIVE ──────────────────────────────────────────────────────────────────
+    if (type === "live") {
+      const liveMatches = await fetchLiveFixtures();
+      for (const lg of LEAGUES) {
+        const teamMap   = await loadTeamStats(lg.id, season);
+        const lgMatches = liveMatches.filter((m: any) => m._leagueId === lg.id);
+        for (const m of lgMatches) {
+          const norm = normaliseFDOMatch(m, lg.id);
+          const ok   = await upsertFixture(db, norm, teamMap, { ...lg, season });
+          if (ok) synced++;
+          await delay(100);
+        }
+      }
+
+    // ── STANDINGS ─────────────────────────────────────────────────────────────
+    } else if (type === "standings") {
+      await syncStandingsForLeague(league, season);
+      synced = 1;
+
+    // ── FIXTURES ──────────────────────────────────────────────────────────────
+    } else {
+      const teamMap = await syncStandingsForLeague(league, season);
+      await delay(6500);
+
+      let rawFixtures: any[] = [];
+
+      if (type === "today" || type === "tomorrow" || type === "full") {
+        const todayFixtures = await fetchFixtures(league.id, season, today);
+        await delay(8000);
+        const tomorrowFixtures = await fetchFixtures(league.id, season, tomorrow);
+        rawFixtures = [...todayFixtures, ...tomorrowFixtures];
+      }
+
+      if (type === "upcoming" || type === "full") {
+        await delay(8000);
+        const upcoming = await fetchFixturesRange(league.id, season, from, to);
+        rawFixtures = [...rawFixtures, ...upcoming];
+      }
+
+      // Deduplicate
+      const seen = new Set<number>();
+      rawFixtures = rawFixtures.filter(m => {
+        if (!m?.id || seen.has(m.id)) return false;
+        seen.add(m.id);
+        return true;
+      });
+
+      console.log(`${league.name} [FDO]: ${rawFixtures.length} fixtures to sync`);
+
+      for (const raw of rawFixtures) {
+        const norm = normaliseFDOMatch(raw, league.id);
+        const ok   = await upsertFixture(db, norm, teamMap, { ...league, season });
+        if (ok) synced++;
+        await delay(100);
+      }
+    }
+
+    await db.from("sync_log").insert({
+      sync_type: `${type}_${league?.name ?? "live"}`,
+      status:    "success",
+      records:   synced,
+      message:   `Synced ${synced} records`,
+    });
+
+    return { success: true, synced, league: league?.name ?? "live" };
+
+  } catch (e: any) {
+    console.error("runSync error:", e);
+    await db.from("sync_log").insert({
+      sync_type: type,
+      status:    "error",
+      message:   e?.message ?? "Unknown",
+      records:   0,
+    });
+    return { success: false, error: e?.message ?? "Unknown sync error" };
+  }
+}
+
+
+
+
+
+
+
+
+
+
+/*import { getServiceClient } from "./supabase";
 import {
   LEAGUES,
   getCurrentSeason,
@@ -442,3 +783,4 @@ export async function runSync(
     return { success: false, error: e?.message ?? "Unknown sync error" };
   }
 }
+  */

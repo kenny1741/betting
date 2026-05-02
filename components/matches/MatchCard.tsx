@@ -178,6 +178,7 @@ function AnimatedPct({
 }) {
   const [val, setVal] = useState(0);
   const rafRef  = useRef<number>(0);
+  
   const timer   = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
