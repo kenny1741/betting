@@ -179,7 +179,8 @@ function AnimatedPct({
   const [val, setVal] = useState(0);
   const rafRef  = useRef<number>(0);
   
-  const timer   = useRef<ReturnType<typeof setTimeout>>();
+  //const timer   = useRef<ReturnType<typeof setTimeout>>();
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const DURATION = 1100;
@@ -198,9 +199,9 @@ function AnimatedPct({
     }, mountDelay);
 
     return () => {
-      clearTimeout(timer.current);
-      cancelAnimationFrame(rafRef.current);
-    };
+  if (timer.current) clearTimeout(timer.current);
+  cancelAnimationFrame(rafRef.current);
+};
   }, []); // empty — run once on mount
 
   return (
