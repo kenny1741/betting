@@ -23,4 +23,4 @@
     { "path": "/api/sync?secret=1234&type=live",              "schedule": "*/2 * * * *" },
     { "path": "/api/cron-test",                               "schedule": "* * * * *"   }
   ]
-}
+}" " 
